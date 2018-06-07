@@ -1,0 +1,2 @@
+# fricc
+FRIendly Connection Chooser
