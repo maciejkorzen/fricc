@@ -1,0 +1,5 @@
+name hadoop-master-1.prod.io
+address hadoop-master-1.prod.io
+desc hadoop-master-1.prod.io allyourbase
+login allyourbase
+redirectports hadoop-master-1.prod.io

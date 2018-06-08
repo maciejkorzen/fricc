@@ -1,0 +1,5 @@
+name creative.client1.sh
+address creative.client1.sh
+desc creative.client1.sh allyourbase
+login allyourbase
+redirectports creative.client1.sh

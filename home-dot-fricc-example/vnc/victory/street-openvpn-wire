@@ -1,0 +1,5 @@
+name street
+address 10.23.45.15
+port 5901
+desc street wire via openvpn
+vnckeyfile street

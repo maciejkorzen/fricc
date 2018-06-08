@@ -1,0 +1,5 @@
+name vnc-server-2
+address vnc-server-2.lan
+port 43211
+desc vnc-server-2 in LAN
+vnckeyfile vnc-server-2

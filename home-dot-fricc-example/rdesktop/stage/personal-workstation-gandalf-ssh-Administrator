@@ -1,0 +1,5 @@
+name personal-workstation
+address 127.0.0.1
+login Administrator
+desc personal-workstation via gandalf ssh Administrator
+port 16560

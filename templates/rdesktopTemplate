@@ -1,0 +1,6 @@
+name my-brand-new-shiny-laptop
+address my-brand-new-shiny-laptop.home.lan
+port 3389
+domain homeDomain
+login jdoe
+desc Base

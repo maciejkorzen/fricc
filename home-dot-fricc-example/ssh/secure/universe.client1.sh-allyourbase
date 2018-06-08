@@ -1,0 +1,5 @@
+name universe.client1.sh
+address 999.888.777.666
+desc universe.client1.sh allyourbase
+login allyourbase
+redirectports universe.client1.sh

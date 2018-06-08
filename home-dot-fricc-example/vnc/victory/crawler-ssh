@@ -1,0 +1,5 @@
+name crawler
+address 127.0.0.1
+port 54261
+desc crawler wire via localhost:54261
+vnckeyfile street

@@ -1,0 +1,7 @@
+name wiki.london.lan
+address 127.0.0.1
+desc wiki.london.lan allyourbase via faction
+login allyourbase
+port 61616
+args -A
+redirectports wiki.london.lan

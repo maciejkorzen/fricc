@@ -1,0 +1,8 @@
+name my-brand-new-server
+address my-brand-new-server.corp.wan
+port 7766
+login jdoe2
+desc my-brand-new-server over wan
+dir /
+redirectports my-brand-new-server
+args -A -X

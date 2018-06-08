@@ -1,0 +1,5 @@
+name personal-workstation
+address 10.1.2.3
+login Administrator
+desc personal-workstation via tiger openvpn Administrator
+port 3389

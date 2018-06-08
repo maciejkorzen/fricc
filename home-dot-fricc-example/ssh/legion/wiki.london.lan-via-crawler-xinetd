@@ -1,0 +1,7 @@
+name wiki.london.lan
+address 10.23.45.12
+desc wiki.london.lan allyourbase via crawler xinetd
+login allyourbase
+port 18382
+args -A
+redirectports wiki.london.lan

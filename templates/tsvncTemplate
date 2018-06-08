@@ -1,0 +1,5 @@
+name my-vps-1
+address my-vps-1.dummy.lan
+port 54541
+login doej
+desc vps-1

@@ -1,0 +1,5 @@
+name street
+address 127.0.0.1
+port 44786
+desc street wire via localhost:44786
+vnckeyfile street

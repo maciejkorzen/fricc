@@ -1,0 +1,498 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use File::Basename;
+use Dumpvalue;
+
+$ENV{'LANG'} = 'C';
+$ENV{'LC_ALL'} = 'C';
+my $dumper = Dumpvalue->new;
+
+my $myname = basename($0);
+my $debug = 0;
+my $output = "";
+my $endmessage = "";
+#my @enderrmessage = ();
+my $exitcode = 0;
+my $printOnly = 0;
+my $envlogname = $ENV{'LOGNAME'};
+my @cfgdirs = ($ENV{'HOME'} . "/.fricc", "/stuff/fricc");
+my @redirectportssubdirs = qw/redirectports/;
+my @redirectportsdirsfullpaths = ();
+my $mytmp = $ENV{'HOME'} . "/tmp/fricc";
+
+my %selectfiles = ();
+my %runfiles = ();
+for ("ssh", "sftp", "sshfs", "mosh")
+{
+	$selectfiles{$_} = $mytmp . "/" . $_ . "select";
+	$runfiles{$_} = $mytmp . "/" . $_ . "run";
+}
+
+my @otherArgs;
+
+sub blad
+{
+	print STDERR "ERROR! " . $myname . ": " . $_[0] . "\n";
+	exit(1);
+}
+
+sub usage
+{
+	print "Usage: " . $myname . " -p [-h] [-d] file\n
+	-h		This help
+	-d		Debug
+	-p		print only
+	file		fricc SSH definitions directory\n"
+}
+
+sub mydebug
+{
+	if ($debug)
+	{
+		print("DEBUG: $_[0]\n");
+	}
+}
+
+sub prepareredirectports
+{
+	my $entry2 = $_[0];
+	my @files2 = ();
+	if ($debug)
+	{
+		print "<prepareredirectports(): dump %entry2>\n";
+		$dumper->dumpValue(\%{$entry2});
+		print "</prepareredirectports(): dump %entry2>\n";
+	}
+	for (@redirectportsdirsfullpaths)
+	{
+		mydebug("prepareredirectports(): dir:(" . $_ . ")");
+		my $rpfile1 = $_ . "/" . $entry2 -> {"redirectports"};
+		if (-e $rpfile1)
+		{
+			mydebug("prepareredirectports(): dir:(" . $rpfile1 . ") - exists");
+			push(@files2, $rpfile1);
+		} else {
+			mydebug("prepareredirectports(): dir:(" . $rpfile1 . ") - missing");
+		}
+	}
+	mydebug("prepareredirectports(): files to consider: @files2");
+	my @rpcontent = ();
+	for (@files2)
+	{
+		my $file3 = $_;
+		my $fh2;
+		open($fh2, "<", $file3) or blad("prepareredirectports(): Can't open file '" . $file3 . "': $!");
+		while(<$fh2>)
+		{
+			unless ($_ =~ m/^#/)
+			{
+				push(@rpcontent, $_);
+			}
+		}
+		close($fh2) or warn("prepareredirectports(): close() on '" . $file3 . "' failed: $!");
+	}
+	my $redirectportsargs = "";
+	if ($#rpcontent >= 0)
+	{
+		chomp(@rpcontent);
+		my @rpcontent2 = @rpcontent;
+		@rpcontent = sort(@rpcontent2);
+		#sort!(@rpcontent);
+		my %hash1 = map { $_, 1 } @rpcontent;
+		my @rpcontentunique = keys %hash1;
+		if ($debug)
+		{
+			print "<prepareredirectports(): dump \@rpcontentunique>\n";
+			$dumper->dumpValue(\@rpcontentunique);
+			print "</prepareredirectports(): dump \@rpcontentunique>\n";
+		}
+		$redirectportsargs = redirectportsprocesslines($entry2, \@rpcontentunique);
+	}
+	return($redirectportsargs);
+}
+
+sub redirectportsprocesslines
+{
+	if ($debug)
+	{
+		print "<redirectportsprocesslines(): dump \@_>\n";
+		$dumper->dumpValue(\@_);
+		print "</redirectportsprocesslines(): dump \@_>\n";
+	}
+	my $entry2 = $_[0];
+	my $rpcontentunique = $_[1];
+	my $redirectargs = "";
+	for (@{$rpcontentunique})
+	{
+		my @parts = split(/ /, $_);
+		if ($debug)
+		{
+			print "<redirectportsprocesslines(): dump \@parts>\n";
+			$dumper->dumpValue(\@parts);
+			print "</redirectportsprocesslines(): dump \@parts>\n";
+		}
+		mydebug("redirectportsprocesslines(): \$#parts:(" . $#parts . ")");
+		if ($#parts < 1)
+		{
+			blad("redirectportsprocesslines(): Syntax error in redirectports for '" . $entry2 -> {"redirectports"} . "': line '@parts'");
+		}
+		my $type = $parts[0];
+		my $lport = $parts[1];
+		if ($type eq "local")
+		{
+			my $remip = $parts[2];
+			my $remport = $parts[3];
+			if (($remip eq "") || ($remport eq ""))
+			{
+				blad("redirectportsprocesslines(): Syntax error in redirectports for '" . $entry2 -> {"redirectports"} . "': line '@parts'");
+			}
+			$redirectargs .=  ' $(czyPortJestPrzekierowany ' . $lport . ' || echo "-L ' . $lport . ':' . $remip . ':' . $remport . '")';
+		} elsif ($type eq "remote") {
+			my $remip = $parts[2];
+			my $remport = $parts[3];
+			if (($remip eq "") || ($remport eq ""))
+			{
+				blad("redirectportsprocesslines(): Syntax error in redirectports for '" . $entry2 -> {"redirectports"} . "': line '@parts'");
+			}
+			$redirectargs .=  ' -R ' . $lport . ":" . $remip . ":" . $remport;
+		} elsif ($type eq "socks") {
+			$redirectargs .=  ' $(czyPortJestPrzekierowany ' . $lport . ' || echo "-D ' . $lport . '")'
+		} else {
+			blad("redirectportsprocesslines(): Syntax error in redirectports for '" . $entry2 -> {"redirectports"} . "': line '@parts'. Unknown type.");
+		}
+	}
+	return($redirectargs);
+}
+
+sub writesshfiles
+{
+	if ($debug)
+	{
+		print "<writesshfiles(): dump \@_>\n";
+		$dumper->dumpValue(\@_);
+		print "</writesshfiles(): dump \@_>\n";
+	}
+	my $entry2 = $_[0];
+	my $redirectportsargs = $_[1];
+	my $selectstring = $entry2 -> {"name"} . '_' . $entry2 -> {"login"} . '_' . $entry2 -> {"address"} . "_" . $entry2 -> {"port"} . ' "' . $entry2 -> {"desc"} . '"';
+	mydebug("writesshfiles(): \$selectstring:(" . $selectstring . ")");
+
+	my $fh4;
+	open($fh4, "+<", $selectfiles{"ssh"}) or blad("writesshfiles(): Can't open file '" . $selectfiles{"ssh"} . "': $!");
+	my @sshselectcontent = <$fh4>;
+	chomp(@sshselectcontent);
+	mydebug("writesshfiles(): content of sshselect file:(" . join("\n", @sshselectcontent) . ")");
+	if (grep(/$selectstring/, @sshselectcontent))
+	{
+		blad("duplicated entry for '" . $entry2 -> {"name"} . "'");
+	}
+	#seek($fh4, 0, 2) or blad("writesshfiles(): seek() failed on file '" . $selectfiles{"ssh"} . "'");
+	my $selectstring2 = "\t" . $selectstring . " \\\n";
+	#print $fh4 $selectstring2;
+	close($fh4) or warn "writesshfiles(): close() on '" . $selectfiles{"ssh"} . "' failed: $!";
+	for (values(%selectfiles))
+	{
+		appendToFile($_, $selectstring2);
+	}
+	createsshrunfiles($entry2, $redirectportsargs);
+}
+
+sub createsshrunfiles
+{
+	if ($debug)
+	{
+		print "<createsshrunfiles(): dump \@_>\n";
+		$dumper->dumpValue(\@_);
+		print "</createsshrunfiles(): dump \@_>\n";
+	}
+	my $entry2 = $_[0];
+	my $redirectportsargs = $_[1];
+	if ($debug)
+	{
+		print "<createsshrunfiles(): dump \$entry2>\n";
+		$dumper->dumpValue(\%{$entry2});
+		print "</createsshrunfiles(): dump \$entry2>\n";
+	}
+	appendSshRunFile($entry2, $runfiles{"ssh"}, $redirectportsargs);
+	appendSftpRunFile($entry2, $runfiles{"sftp"});
+	appendSshfsRunFile($entry2, $runfiles{"sshfs"});
+	appendMoshRunFile($entry2, $runfiles{"mosh"});
+}
+
+sub appendMoshRunFile
+{
+	if ($debug)
+	{
+		print "DEBUG: currently I'm in " . (caller(0))[3] . "\n";
+	}
+	my $entry2 = $_[0];
+	my $file2 = $_[1];
+	open(my $fh6, ">>", $file2) or blad("appendMoshRunFile(): Can't open file '" . $file2 . "': $!");
+	print $fh6 "\t" . $entry2 -> {"name"} . "_" . $entry2 -> {"login"} . "_" . $entry2 -> {"address"} . "_" . $entry2 -> {"port"} . ")\n";
+	print $fh6 "\t\t" . "mosh --ssh=\"ssh -p" . $entry2 -> {"port"} . "\" " . $entry2 -> {"login"} . "@" . $entry2 -> {"address"} . "\n";
+	print $fh6 "\t;;\n";
+	close($fh6) or warn "appendMoshRunFile(): close() on '" . $file2 . "' failed: $!";
+}
+
+sub appendSshfsRunFile
+{
+	if ($debug)
+	{
+		print "DEBUG: currently I'm in " . (caller(0))[3] . "\n";
+	}
+	my $entry2 = $_[0];
+	my $file2 = $_[1];
+	open(my $fh6, ">>", $file2) or blad("appendSshfsRunFile(): Can't open file '" . $file2 . "': $!");
+	print $fh6 "\t" . $entry2 -> {"name"} . "_" . $entry2 -> {"login"} . "_" . $entry2 -> {"address"} . "_" . $entry2 -> {"port"} . ")\n";
+	print $fh6 "\t\t" . "sshfs -o reconnect -o workaround=rename -oPort=" . $entry2 -> {"port"} . " " . $entry2 -> {"login"} . "@" . 
+	           $entry2 -> {"address"} . ":" . $entry2 -> {"dir"} . " \$(katalogSshfs " . $entry2 -> {"name"} . ")\n";
+	print $fh6 "\t;;\n";
+	close($fh6) or warn "appendSshfsRunFile(): close() on '" . $file2 . "' failed: $!";
+}
+
+sub appendSftpRunFile
+{
+	if ($debug)
+	{
+		print "DEBUG: currently I'm in " . (caller(0))[3] . "\n";
+	}
+	my $entry2 = $_[0];
+	my $file2 = $_[1];
+	open(my $fh6, ">>", $file2) or blad("appendSftpRunFile(): Can't open file '" . $file2 . "': $!");
+	print $fh6 "\t" . $entry2 -> {"name"} . "_" . $entry2 -> {"login"} . "_" . $entry2 -> {"address"} . "_" . $entry2 -> {"port"} . ")\n";
+	print $fh6 "\t\t" . "sftp -oPort=" . $entry2 -> {"port"} . " " . $entry2 -> {"login"} . "@" . $entry2 -> {"address"} . "\n";
+	print $fh6 "\t;;\n";
+	close($fh6) or warn "appendSftpRunFile(): close() on '" . $file2 . "' failed: $!";
+}
+
+sub appendSshRunFile
+{
+	if ($debug)
+	{
+		print "DEBUG: currently I'm in " . (caller(0))[3] . "\n";
+	}
+	my $entry2 = $_[0];
+	my $file2 = $_[1];
+	my $redirectportsargs = $_[2];
+	open(my $fh6, ">>", $file2) or blad("appendSshRunFile(): Can't open file '" . $file2 . "': $!");
+	print $fh6 "\t" . $entry2 -> {"name"} . "_" . $entry2 -> {"login"} . "_" . $entry2 -> {"address"} . "_" . $entry2 -> {"port"} . ")\n";
+	print $fh6 "\t\t" . "setTerminalTitle " . $entry2 -> {"name"} . "\n";
+	print $fh6 "\t\t" . "exec ssh -C " . $entry2 -> {"args"} . " " . 
+	           $redirectportsargs . " -oPort=" . $entry2 -> {"port"} . 
+		   " " . $entry2 -> {"login"} . "@" . $entry2 -> {"address"} . 
+		   "\n";
+	print $fh6 "\t;;\n";
+	close($fh6) or warn "appendSshRunFile(): close() on '" . $file2 . "' failed: $!";
+}
+
+sub appendToFile
+{
+	my $file1 = $_[0];
+	my $string1 = $_[1];
+	open(my $fh5, ">>", $file1) or blad("appendToFile(" . $file1 . ", " . $string1 . "): Can't open file '" . $file1 . "': $!");
+	print $fh5 $string1 or blad("appendToFile(" . $file1 . ", " . $string1 . "): error while print");
+	close($fh5) or warn "appendToFile(): close() on '" . $file1 . "' failed: $!";
+}
+
+sub processDir
+{
+	mydebug((caller(0))[3] . ": '" . $_[0] . "'");
+	my %p = ();
+	%p = findFilesInDir($_[0]);
+	if ($debug)
+	{
+		print "<" . (caller(0))[3] . "(): dump %p>\n";
+		$dumper->dumpValue(\%p);
+		print "</" . (caller(0))[3] . "(): dump %p>\n";
+	}
+	for (sort(keys(%p)))
+	{
+		processFile($p{$_});
+	}
+}
+
+sub findFilesInDir
+{
+	my $dir1 = $_[0];
+	mydebug((caller(0))[3] . ": '" . $dir1 . "'");
+	my @dirsQueue = ();
+	push(@dirsQueue, $dir1);
+	my %filesFound = ();
+	while($#dirsQueue > -1)
+	{
+		my $dir2 = shift(@dirsQueue);
+		mydebug((caller(0))[3] . ": processing dir '" . $dir2 . "'");
+		my $fhdir2;
+		opendir($fhdir2, $dir2) or blad((caller(0))[3] . ": Can't open '" . $dir2 . "' dir: " . $!);
+		while (my $plik = readdir($fhdir2))
+		{
+			unless ($plik =~ /^\./)
+			{
+				my $fullfilepath1 = $dir2 . "/" . $plik;
+				mydebug((caller(0))[3] . ": znalazlem obiekt: '" . $fullfilepath1 . "'");
+				if (-f $fullfilepath1)
+				{
+					if (exists($filesFound{$plik}))
+					{
+						blad((caller(0))[3] . ": Duplicated file name: '" . $fullfilepath1 . "'");
+					} else {
+						$filesFound{$plik} = $fullfilepath1;
+					}
+				} elsif (-d $fullfilepath1) {
+					push(@dirsQueue, $fullfilepath1);
+				}
+			}
+		}
+		closedir($fhdir2) or warn((caller(0))[3] . ": closedir() failed");
+	}
+	return(%filesFound);
+}
+
+sub processFile
+{
+	my $file1 = $_[0];
+	mydebug((caller(0))[3] . " " . $file1);
+	unless (-e $file1)
+	{
+		blad("File '" . $file1 . "' doesn't exist.");
+	}
+
+	my $fh1;
+	open($fh1, "<", $file1) or blad("Can't open file '" . $file1 . "': $!");
+	my @content = <$fh1>;
+	close($fh1) or warn "close() on '" . $file1 . "' failed: $!";
+	chomp(@content);
+	mydebug("Content of file:(" . join("\n", @content) . ")");
+
+	my %entry = ();
+
+	foreach (qw/name address login args desc dir port redirectports/)
+	{
+		my $varname = $_;
+		mydebug("foreach:key:(" . $varname . ")");
+		$entry{$varname} = "";
+		#my $entryName = "";
+		if (my @ret = grep(/^$varname /, @content))
+		{
+			$entry{$varname} = $ret[0];
+			$entry{$varname} =~ s/^$varname //;
+		}
+		#eval("print \"DEBUG2:(" . $ref1 . ")\n\";");
+		#eval("print \"DEBUG3:(" . $entry{$varname} . ")\n\";");
+		#mydebug("\$val:(" . $ref1 . ")");
+		#print "<dump>\n";
+		#$dumper->dumpValue(\%entry);
+		#$dumper->dumpValue(\$ref1);
+		#print "</dump>\n";
+	}
+
+	if ($entry{"port"} eq "")
+	{
+		$entry{"port"} = 22;
+	}
+
+	if (($entry{"address"} eq "") && ($entry{"name"} eq ""))
+	{
+		blad("No address or name in '" . $file1 . "'");
+	}
+
+	if ($entry{"name"} eq "")
+	{
+		$entry{"name"} = $entry{"address"};
+	}
+
+	if ($entry{"address"} eq "")
+	{
+		$entry{"address"} = $entry{"name"};
+	}
+
+	if ($entry{"login"} eq "")
+	{
+		$entry{"login"} = $envlogname;
+	}
+
+	if ($entry{"desc"} eq "")
+	{
+		$entry{"desc"} = $entry{"login"} . "@" . $entry{"address"} . ":" . $entry{"port"};
+	}
+
+	if ($entry{"dir"} eq "")
+	{
+		$entry{"dir"} = "/";
+	}
+
+	if ($debug)
+	{
+		print "<%entry>\n";
+		print "$_ = $entry{$_}\n" for (sort keys %entry);
+		print "</%entry>\n";
+	}
+
+	if ($printOnly)
+	{
+		print $entry{"name"} . " " . $entry{"login"} . " " . $entry{"address"} . " " . $entry{"port"};
+		exit(0);
+	}
+
+	my $redirectportsargs = "";
+	unless ($entry{"redirectports"} eq "")
+	{
+		$redirectportsargs = prepareredirectports(\%entry);
+		if ($redirectportsargs eq "")
+		{
+			blad((caller(0))[3] . "(): redirectports file name specified but no rules found for '" . $file1 . "': " . $!);
+		}
+	}
+
+	writesshfiles(\%entry, $redirectportsargs);
+}
+
+for (@cfgdirs)
+{
+	my $dir1 = $_;
+	for (@redirectportssubdirs)
+	{
+		push(@redirectportsdirsfullpaths, $dir1 . "/" . $_);
+	}
+}
+
+#print "DEBUG0: \@ARGV:(" . join(' ', @ARGV) . ")\n";
+
+while (my $i = shift(@ARGV))
+{
+	if ($i =~ m/^-h$/)
+	{
+		usage();
+		exit(0);
+	} elsif ($i =~ m/^-d$/) {
+		$debug = 1;
+	} elsif ($i =~ m/^-p$/) {
+		$printOnly = 1;
+	} else {
+		push(@otherArgs, $i);
+		push(@otherArgs, @ARGV);
+		@ARGV = ();
+	}
+}
+
+if ($#otherArgs < 0)
+{
+	usage();
+	exit(1);
+}
+
+unless ($envlogname =~ m/^[a-zA-Z0-9]{2,}/)
+{
+	blad("\$ENV{'LOGNAME'} looks invalid");
+}
+
+mydebug("\$ENV{'LOGNAME'}:(" . $ENV{'LOGNAME'} . ")");
+mydebug("\@cfgdirs:(@cfgdirs)");
+mydebug("\@redirectportsdirsfullpaths:(@redirectportsdirsfullpaths)");
+mydebug("\$selectfiles{\"ssh\"}:(" . $selectfiles{"ssh"} . ")");
+mydebug("\$selectfiles{\"sftp\"}:(" . $selectfiles{"sftp"} . ")");
+
+my $dir1 = $otherArgs[0];
+processDir($dir1);

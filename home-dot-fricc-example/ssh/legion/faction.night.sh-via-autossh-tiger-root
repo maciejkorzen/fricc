@@ -1,0 +1,6 @@
+name faction.night.sh
+address 127.0.0.1
+desc faction.night.sh via tiger autossh root
+login root
+port 28421
+redirectports faction.night.sh

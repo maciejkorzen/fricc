@@ -1,0 +1,5 @@
+name mgmt1.corp.lan
+address mgmt1.corp.lan
+domain corp
+login johnny
+desc mgmt1.corp.lan

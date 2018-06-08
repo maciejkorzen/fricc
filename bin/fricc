@@ -1,0 +1,666 @@
+#!/bin/sh
+
+##### DESCRIPTION ###########################################################
+# SSH, Redsktop, VNC, etc. connection manager.
+# https://github.com/maciejkorzen/fricc
+#
+##### USAGE #################################################################
+# See README.md.
+#
+##### LICENSE ###############################################################
+# Copyright 2018 Maciej Korzen
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 dated June, 1991.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+##### AUTHOR ################################################################
+# Maciej Korzeń
+# maciek@korzen.org, mkorzen@gmail.com
+# http://www.korzen.org/
+
+cfgdir=$HOME/.fricc
+cfgdir2=/usr/local/etc/fricc
+
+mytmp=$HOME/tmp/fricc
+
+sshcfgdir=$cfgdir/ssh
+sshcfgdir2=$cfgdir2/ssh
+tsvnccfgdir=$cfgdir/tsvnc
+tsvnccfgdir2=$cfgdir2/tsvnc
+rdesktopcfgdir=$cfgdir/rdesktop
+rdesktopcfgdir2=$cfgdir2/rdesktop
+vnccfgdir=$cfgdir/vnc
+vnccfgdir2=$cfgdir2/vnc
+redirectportsdir=$cfgdir/redirectports
+redirectportsdir2=$cfgdir2/redirectports
+
+sshselect=$mytmp/sshselect
+sshrun=$mytmp/sshrun
+
+# <customization>
+sshcmd="ssh -C"
+#sshcmd="ssh -C -4"
+#sshcmd="ssh -A -C -X"
+# </customization>
+
+sftpselect=$mytmp/sftpselect
+sftprun=$mytmp/sftprun
+sftpcmd="sftp"
+
+sshfsselect=$mytmp/sshfsselect
+sshfsrun=$mytmp/sshfsrun
+sshfscmd="sshfs -o reconnect -o workaround=rename"
+
+moshselect=$mytmp/moshselect
+moshrun=$mytmp/moshrun
+moshcmd="mosh"
+
+isCygwin="false"
+
+#rdesktopGeometry="-f"
+#case `hostname` in
+#	device-something)
+#		rdesktopGeometry="-g 1350x680"
+#	;;
+#esac
+
+rdesktopDetectResolution()
+{
+	resolutions=$(xrandr 2>/dev/null | fgrep \* | awk '{ print $1; }')
+
+	count=$(echo "$resolutions" | wc -l)
+
+	#echo "Count of monitors: $count"
+
+	topSize=0
+	topRes="0x0"
+	if [ -z "$resolutions" ]; then
+		echo "800x600"
+		return
+	fi
+	if [ "$count" -gt "1" ]; then
+		#echo "More than two monitors. Doing calculations"
+		for res in $resolutions; do
+			#echo "topSize:$topSize"
+			#echo "topRes:$topRes"
+			#echo "Doing calculation for resolution $res..."
+			arg1=$(echo $res | cut -d  x -f 1)
+			arg2=$(echo $res | cut -d x -f 2)
+			#echo "arg1:$arg1"
+			#echo "arg2:$arg2"
+			size=$(expr $arg1 \* $arg2)
+			#echo "Size: $arg1 * $arg2 = $size"
+			if [ "$size" -gt "$topSize" ]; then
+				#echo "Current resolution is greater than top resolution. Changing top resolution to current one"
+				topSize=$size
+				topRes=$res
+			fi
+		done
+	else
+		topRes="$resolutions"
+	fi
+
+	#echo "Resolution that was choosen: $topRes"
+	arg1=$(echo $topRes | cut -d x -f 1)
+	arg2=$(echo $topRes | cut -d x -f 2)
+	arg1=$(expr $arg1 - 20)
+	arg2=$(expr $arg2 - 100)
+	#echo "Final resolution for rdesktop: ${arg1}x${arg2}"
+	echo "${arg1}x${arg2}"
+}
+
+if ! [ -e $mytmp ]; then
+	mkdir -p "$mytmp" || myerror "can not create $mytmp/"
+fi
+
+if ! [ -d "${mytmp}" ]; then
+	myerror "tmp dir '${mytmp}' is not a directory"
+fi
+
+if uname -a | egrep -i cygwin >/dev/null; then
+	isCygwin="true"
+fi
+
+rdesktopselect="$mytmp/rdesktopselect"
+rdesktoprun="$mytmp/rdesktoprun"
+
+# <customization>
+#rdesktopcmd="rdesktop -a 16 -k pl -z"
+#rdesktopcmd="myrdesktopsshwrap -a 16 -k pl -z -r clipboard:PRIMARYCLIPBOARD"
+#rdesktopcmd="rdesktop -a 16 -k pl -z -r clipboard:PRIMARYCLIPBOARD"
+rdesktopcmd="xfreerdp -a 32 -k 0x00000415 -z --ignore-certificate --plugin rdpsnd --plugin cliprdr --fonts"
+
+if [ "$(hostname -f)" = "some-device-2" ]; then
+	rdesktopcmd="xfreerdp ${rdesktopGeometry} -a 32 -k 0x00000415 -z --ignore-certificate --no-nla"
+fi
+# </customization>
+
+rdesktopzeroselect="$mytmp/rdesktopzeroselect"
+rdesktopzerorun="$mytmp/rdesktopzerorun"
+
+# <customization>
+rdesktopzerocmd="rdesktop -0 -a 16 -k pl -z -r clipboard:PRIMARYCLIPBOARD"
+#rdesktopzerocmd="myrdesktopsshwrap -0 -a 16 -k pl -z -r clipboard:PRIMARYCLIPBOARD"
+#rdesktopzerocmd="rdesktop -0 -a 16 -k pl -z"
+#rdesktopzerocmd="rdesktop ${rdesktopGeometry} -0 -a 16 -k pl -z"
+# </customization>
+
+tsvncselect="$mytmp/tsvncselect"
+tsvncrun="$mytmp/tsvncrun"
+
+# <customization>
+tsvnccmd="tsvnc"
+# </customization>
+
+vncselect="$mytmp/vncselect"
+vncrun="$mytmp/vncrun"
+
+# <customization>
+#vnccmd="vncviewer -compresslevel 9 -quality 3 -encodings zlib"
+vnccmd="vncviewer"
+#vnccmd="vinagre"
+#vnccmd="/usr/local/tigervnc/bin/vncviewer"
+# </customization>
+
+dialogCmd="dialog"
+
+myerror()
+{
+	echo "$1" >&2
+	exit 1
+}
+
+readrdesktopfile()
+{
+	name=$(egrep '^name ' "$1" | awk '{print $2}')
+	address=$(egrep '^address ' "$1" | awk '{print $2}')
+	port=$(egrep '^port ' "$1" | awk '{print $2}')
+	login=$(egrep '^login ' "$1" | awk '{print $2}')
+	domain=$(egrep '^domain ' "$1" | awk '{print $2}')
+	desc=$(egrep '^desc ' "$1" | cut -d ' ' -f 2-)
+
+	if [ -z "$port" ]; then
+		port=3389
+	fi
+	if [ -z  "$address" ] && [ -z "$name" ]; then
+		myerror "no address or name in $1"
+	fi
+	if [ -z  "$name" ]; then
+		name=$address
+	fi
+	if [ -z  "$address" ]; then
+		address=$name
+	fi
+	if [ -z  "$login" ]; then
+		login=$LOGNAME
+	fi
+	if [ -n "$domain" ]; then
+		domain="-d $domain"
+	fi
+	if [ -z "$desc" ]; then
+		desc="${address} ${login}"
+	fi
+
+	selectstring="${name}_${login}_${address}_${port} \"${desc}\""
+
+	if fgrep "$selectstring" $rdesktopselect >/dev/null; then
+		echo "entry from $1 duplicates existing entry"
+		return 1
+	fi
+
+	for i in $rdesktopselect $rdesktopzeroselect; do
+		echo "	$selectstring \\" >> "$i"
+	done
+
+	echo "	${name}_${login}_${address}_${port})" >> $rdesktoprun
+	echo "		$rdesktopcmd \$rdesktopArgs -T ${name} -u $login $domain $address:$port >/dev/null 2>&1 &" >> $rdesktoprun
+	echo "	;;" >> $rdesktoprun
+
+	echo "	${name}_${login}_${address}_${port})" >> $rdesktopzerorun
+	echo "		$rdesktopzerocmd \$rdestkopArgs -T ${name} -u $login $domain $address:$port >/dev/null 2>&1 &" >> $rdesktopzerorun
+	echo "	;;" >> $rdesktopzerorun
+
+	return 0
+}
+
+readtsvncfile()
+{
+	name=$(egrep '^name ' "$1" | awk '{print $2}')
+	address=$(egrep '^address ' "$1" | awk '{print $2}')
+	port=$(egrep '^port ' "$1" | awk '{print $2}')
+	login=$(egrep '^login ' "$1" | awk '{print $2}')
+	desc=$(egrep '^desc ' "$1" | cut -d ' ' -f 2-)
+
+	if [ -z "$port" ]; then
+		port=22
+	fi
+	if [ -z  "$address" ] && [ -z "$name" ]; then
+		myerror "no address or name in $1"
+	fi
+	if [ -z  "$name" ]; then
+		name=$address
+	fi
+	if [ -z  "$address" ]; then
+		address=$name
+	fi
+	if [ -z  "$login" ]; then
+		login=$LOGNAME
+	fi
+	if [ -z "$desc" ]; then
+		desc="${address} ${login}"
+	fi
+
+	selectstring="${name}_${login}_${port} \"${desc}\""
+
+	if fgrep "$selectstring" $tsvncselect >/dev/null; then
+		echo "entry from $1 duplicates existing entry"
+		return 1
+	fi
+
+	echo "	$selectstring \\" >> $tsvncselect
+
+	echo "	${name}_${login}_${port})" >> $tsvncrun
+	echo "		export SSVNC_SCALE=auto" >> $tsvncrun
+	echo "		$tsvnccmd ${login}@$address:$port >/dev/null 2>&1 &" >> $tsvncrun
+	echo "	;;" >> $tsvncrun
+
+	return 0
+}
+
+readvncfile()
+{
+	ret=0
+	name=$(egrep '^name ' "$1" | awk '{print $2}')
+	address=$(egrep '^address ' "$1" | awk '{print $2}')
+	port=$(egrep '^port ' "$1" | awk '{print $2}')
+	desc=$(egrep '^desc ' "$1" | cut -d ' ' -f 2-)
+	vnckeyfile=$(egrep '^vnckeyfile ' "$1" | awk '{print $2}')
+	vncargs=""
+
+	if [ -z "$port" ]; then
+		port=5901
+	fi
+	if [ -z  "$address" ] && [ -z "$name" ]; then
+		myerror "no address or name in $1"
+	fi
+	if [ -z  "$name" ]; then
+		name=$address
+	fi
+	if [ -z  "$address" ]; then
+		address=$name
+	fi
+	if [ -z "$desc" ]; then
+		desc="${login}@${address}:${port}"
+	fi
+	if [ -n "$vnckeyfile" ]; then
+		vnckeyfilefullpath="${HOME}/fricc/vnc-keys/${vnckeyfile}"
+		if [ -e "${vnckeyfilefullpath}" ]; then
+			vncargs="PasswordFile=${vnckeyfilefullpath}"
+		fi
+	fi
+
+	selectstring="${name}_${address}_${port} \"${desc}\""
+
+	if fgrep "$selectstring" $vncselect >/dev/null; then
+		echo "entry from $1 duplicates existing entry"
+		return 1
+	fi
+
+	echo "	$selectstring \\" >> $vncselect
+
+	echo "	${name}_${address}_${port})" >> $vncrun
+	echo "		$vnccmd $vncargs $address:$port >/dev/null 2>&1 &" >> $vncrun
+	echo "	;;" >> $vncrun
+
+	return 0
+}
+
+doesExecutableExist()
+{
+	if [ -z "$1" ]; then
+		myerror "Error! doesExecutableExist(): given empty \$1"
+	fi
+	for i in $(echo $PATH | tr : ' '); do
+		y="${i}/${1}"
+		if [ -e "${y}" ] && ([ -f "${y}" ] || [ -l "${y}" ]) && [ -x "${y}" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+wybierzSsh()
+{
+	sh $sshselect
+	sh $sshrun
+}
+
+wybierzSftp()
+{
+	sh $sftpselect
+	sh $sftprun
+}
+
+wybierzSshfs()
+{
+	sh $sshfsselect
+	sh $sshfsrun
+}
+
+wybierzMosh()
+{
+	sh $moshselect
+	sh $moshrun
+}
+
+wybierzRdesktop()
+{
+	sh $rdesktopselect
+	sh $rdesktoprun
+}
+
+wybierzRdesktopZero()
+{
+	sh $rdesktopzeroselect
+	sh $rdesktopzerorun
+}
+
+wybierzTsvnc()
+{
+	sh $tsvncselect
+	sh $tsvncrun
+}
+
+wybierzVnc()
+{
+	sh $vncselect
+	sh $vncrun
+}
+
+listSshServers()
+{
+	#echo "DEBUG: listSshServers(): args($*) dirs($dirs)"
+	dirsToSearch=""
+	#pathHistory=":"
+	argHistory=":"
+	if [ -n "$1" ]; then
+		for arg in $(echo $* | tr ' ' '\n' | sort); do
+			if echo "${argHistory}" | fgrep ":${arg}:" >/dev/null; then
+				#echo "DEBUG: duplicate category: ${arg}, skipping"
+				continue
+			else
+				argHistory="${argHistory}${arg}:"
+			fi
+			categoryFound="false"
+			for dir in $(echo $dirs | tr ' ' '\n' | sort); do
+				path="${dir}/ssh/${arg}"
+#				if echo "${pathHistory}" | fgrep ":${path}:" >/dev/null; then
+#					echo "DEBUG: duplicate path: ${path}, skipping"
+#					continue
+#				else
+#					pathHistory="${pathHistory}${path}:"
+#				fi
+				if [ -e "${path}" ]; then
+					#echo "i will search in ${path}"
+					#dirsToSearch="${dirsToSearch}:${path}"
+					categoryFound="true"
+					listSshServersSingleDir "$path"
+				fi
+			done
+			if [ "$categoryFound" = "false" ]; then
+				echo "ERROR! Category not found: ${arg}" >&2
+			fi
+#			fi
+#			echo "Categories: $categoryDirs"
+#			done
+		done
+	else
+		dirsToSearch=""
+		for dir in $(echo $dirs | tr ' ' '\n' | sort); do
+			dir="${dir}/ssh"
+			if [ -e "$dir" ]; then
+				find -L "$dir" -maxdepth 1 -type d ! -path . ! -path .. ! -path "$dir" | sort -u | while read singleDir; do
+					listSshServersSingleDir "$singleDir"
+				done
+			fi
+		done
+	fi
+	#dirsToSearch=$(echo $dirsToSearch | sed -e 's,^:,,' -e 's,:$,,')
+	#echo "DEBUG: listSshServers(): dirsToSearch($dirsToSearch)"
+}
+
+listSshServersSingleDir()
+{
+	fricc-helper-readhsshfile -p "$1" || exit 1
+}
+
+dirs=""
+for i in ${cfgdir} ${cfgdir2}; do
+	if [ -e $i ]; then
+		dirs="$dirs $i"
+	fi
+done
+
+if [ "$1" = "--list-ssh-servers" ]; then
+	shift
+	listSshServers $*
+	exit
+fi
+
+rdesktopDetectResolution > "${mytmp}/rdesktop-geometry"
+
+if [ "$isCygwin" = "false" ]; then
+	if ! doesExecutableExist rdesktop; then
+		if ! doesExecutableExist xfreerdp; then
+			echo "Please install rdesktop or (x)freerdp."
+			exit 1
+		fi
+	fi
+
+	vnccmd2=$(echo "$vnccmd" | awk '{ print $1; }')
+	if ! doesExecutableExist "$vnccmd2"; then
+		echo "Please install ${vnccmd2}."
+		exit 1
+	fi
+fi
+
+if ! doesExecutableExist ${dialogCmd}; then
+	echo "Please install dialog."
+	exit 1
+fi
+
+#set -x
+find -L $HOME/tmp -maxdepth 1 -type f -name 'friccanswer*' -mtime +1 -exec rm '{}' \;
+answerFile=$(mktemp "$HOME/tmp/friccanswerXXXXXXX")
+
+cfglastmofificationtime=$(find -L ${dirs} -type f \! -path '*/.svn/*' -printf '%T@\n' | cut -d . -f 1 |sort -u -n | tail -n 1)
+generatedlastmofificationtime=$(find -L ${mytmp}/ -type f \! -path '*/.svn/*' \! -path '*/rdesktop-geometry' -printf '%T@\n' | cut -d . -f 1 | sort -u -n | head -n 1)
+#echo "cfg last modfifcation:		A${cfglastmofificationtime}A"
+#echo "generated last modification:	A${generatedlastmofificationtime}A"
+regenerate=0
+if [ -z "$generatedlastmofificationtime" ]; then
+	regenerate=1
+else
+	if [ $cfglastmofificationtime -gt $generatedlastmofificationtime ]; then
+		regenerate=1
+	fi
+fi
+#set +x
+if [ ${regenerate} -eq 1 ]; then
+	echo "Generating cache files..."
+	echo "${dialogCmd} --menu \"SSH\" 0 0 0 \\" > $sshselect
+	echo "${dialogCmd} --menu \"SFTP\" 0 0 0 \\" > $sftpselect
+	echo "${dialogCmd} --menu \"SSHfs\" 0 0 0 \\" > $sshfsselect
+	echo "${dialogCmd} --menu \"mosh\" 0 0 0 \\" > $moshselect
+	echo "${dialogCmd} --menu \"rdestkop\" 0 0 0 \\" > $rdesktopselect
+	echo "${dialogCmd} --menu \"rdestkopZero\" 0 0 0 \\" > $rdesktopzeroselect
+	echo "${dialogCmd} --menu \"VNC\" 0 0 0 \\" > $vncselect
+	echo "${dialogCmd} --menu \"tsvnc\" 0 0 0 \\" > $tsvncselect
+
+	for i in $sshrun $sftprun $sshfsrun $moshrun $rdesktoprun $rdesktopzerorun $vncrun $tsvncrun; do
+		echo -n > $i
+	done
+
+	cat << EOF >> $sshfsrun
+katalogSshfs()
+{
+	#[ -e "$HOME/sshfs/\$1" ] || mkdir -p "$HOME/sshfs/\$1"
+	[ -e "/mnt/sshfs/\$1" ] || mkdir -p "/mnt/sshfs/\$1"
+	#echo "$HOME/sshfs/\$1"
+	echo "/mnt/sshfs/\$1"
+}
+
+EOF
+
+	cat << EOF >> $sshrun
+setTerminalTitle()
+{
+	[ "\$KONSOLE_DCOP_SESSION" != "" ] && dcop \$KONSOLE_DCOP_SESSION renameSession "\$1"
+	which fricc-set-term-title >/dev/null 2>&1 && fricc-set-term-title "\$1"
+}
+
+czyPortJestPrzekierowany()
+{
+	if which ss >/dev/null; then
+		if ss -ltn | head -n 1 | fgrep State >/dev/null; then
+			a=\$(ss -ltn 2>/dev/null | awk '{ print \$4; }' | sed -E 's,.*:,,' | egrep "^\$1\\\$" | sort -u | wc -l)
+		else
+			a=\$(ss -ltn 2>/dev/null | awk '{ print \$3; }' | sed -E 's,.*:,,' | egrep "^\$1\\\$" | sort -u | wc -l)
+		fi
+	else
+		a=\$(netstat -ltpn 2>/dev/null | fgrep LISTEN | sed 's,[ \t]\+, ,g' | cut -d ' ' -f 4 | sed -E 's,.*:,,' | egrep "^\$1\\\$" | sort -u | wc -l)
+	fi
+	if [ "\$a" -eq 1 ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+EOF
+
+	for runfile in $rdesktoprun $rdesktopzerorun; do
+		cat << EOF >> $runfile
+if [ -e $mytmp/rdesktop-geometry ]; then
+	rdesktopArgs="-g \$(cat $mytmp/rdesktop-geometry)"
+fi
+EOF
+	done
+
+	for i in $sshrun $sftprun $sshfsrun $moshrun $rdesktoprun $rdesktopzerorun $vncrun $tsvncrun; do
+		echo "ans=\$(cat \"${answerFile}\")" >> $i
+		echo "rm \"${answerFile}\"" >> $i
+		echo "case \${ans} in" >> $i
+	done
+
+	readsuccess=1
+	for i in $sshcfgdir $sshcfgdir2; do
+		if [ -e "$i" ]; then
+			fricc-helper-readhsshfile "$i" || exit 1
+		fi
+	done
+
+	for i in $rdesktopcfgdir $rdesktopcfgdir2; do
+		if [ -e "$i" ]; then
+			for j in `find -L $i -type f | fgrep -v .svn | sort -t / -k 6`; do
+				if [ -e "$j" ]; then
+					readrdesktopfile "$j" || readsuccess=0
+				fi
+			done
+		fi
+	done
+
+	for i in $tsvnccfgdir $tsvnccfgdir2; do
+		if [ -e "$i" ]; then
+			for j in `find -L $i -type f | fgrep -v .svn | sort -t / -k 6`; do
+				if [ -e "$j" ]; then
+					readtsvncfile "$j" || readsuccess=0
+				fi
+			done
+		fi
+	done
+
+	for i in $vnccfgdir $vnccfgdir2; do
+		if [ -e "$i" ]; then
+			for j in `find -L $i -type f | fgrep -v .svn | sort -t / -k 6`; do
+				if [ -e "$j" ]; then
+					readvncfile "$j" || readsuccess=0
+				fi
+			done
+		fi
+	done
+
+	for file1 in $sshselect $sshfsselect $moshselect $sftpselect $rdesktopselect $rdesktopzeroselect $vncselect $tsvncselect; do
+		echo "2> ${answerFile}" >> "$file1"
+	done
+
+	for i in $sshrun $sftprun $sshfsrun $moshrun $rdesktoprun $rdesktopzerorun $vncrun $tsvncrun; do
+		echo "esac" >> $i
+	done
+
+	for file1 in $rdesktoprun $rdesktopzerorun $tsvncrun; do
+		echo "sleep 5" >> "$file1"
+	done
+
+	if [ "$readsuccess" -eq 0 ]; then
+		:
+		#echo ""
+		#echo "press [Enter] to continue"
+		#read null0
+	fi
+fi
+
+#${dialogCmd} --menu "Main menu" 14 25 10 \
+${dialogCmd} --menu "Main menu" 0 0 0 \
+	ssh SSH \
+	sftp Sftp \
+	sshfs SSHfs \
+	mosh mosh \
+	rdesktop Rdesktop \
+	rdesktopzero RdesktopZero \
+	vnc VNC \
+	tsvnc Tsvnc \
+2> ${answerFile}
+
+ans=$(cat "$answerFile")
+rm "$answerFile"
+
+case $ans in
+	ssh)
+		wybierzSsh
+	;;
+	sftp)
+		wybierzSftp
+	;;
+	sshfs)
+		wybierzSshfs
+	;;
+	mosh)
+		wybierzMosh
+	;;
+	rdesktop)
+		wybierzRdesktop
+	;;
+	rdesktopzero)
+		wybierzRdesktopZero
+	;;
+	vnc)
+		wybierzVnc
+	;;
+	tsvnc)
+		wybierzTsvnc
+	;;
+	*)
+		echo "Wybrano cos innego"
+	;;
+esac

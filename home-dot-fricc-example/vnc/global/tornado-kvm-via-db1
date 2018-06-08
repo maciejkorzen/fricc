@@ -1,0 +1,4 @@
+name tornado
+address 127.0.0.1
+port 53765
+desc tornado via madness.some.lan localhost:53765

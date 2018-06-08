@@ -1,0 +1,6 @@
+name faction.night.sh
+address 10.23.45.19
+port 22484
+desc faction.night.sh david via crawler xinetd
+login david
+redirectports faction.night.sh

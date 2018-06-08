@@ -1,0 +1,5 @@
+name personal-workstation
+address 10.1.2.3
+login steve
+desc personal-workstation via tiger openvpn steve
+port 3389

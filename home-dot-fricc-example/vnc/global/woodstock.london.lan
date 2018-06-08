@@ -1,0 +1,4 @@
+name woodstock.london.lan
+address 127.0.0.1
+port 19883
+desc woodstock.london.lan via localhost:19883

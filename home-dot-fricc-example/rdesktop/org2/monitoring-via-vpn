@@ -1,0 +1,6 @@
+name monitoring
+address 172.17.2.3
+domain JIGGY
+login adam.george
+desc monitoring via vpn
+port 18988

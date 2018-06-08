@@ -1,0 +1,4 @@
+name stage-windows1
+address 192.168.22.22
+login userx
+desc stage-windows1 userx

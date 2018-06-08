@@ -1,0 +1,6 @@
+name jira.route12.io
+address 10.23.45.19
+port 43431
+desc jira.route12.io allyourbase via crawler xinetd
+login allyourbase
+redirectports jira.route12.io
