@@ -17,7 +17,14 @@ Following kinds of connections are supported:
 
 # Screenshots
 
-...
+Main menu:
+
+![Main menu screenshot](https://raw.githubusercontent.com/maciejkorzen/fricc/master/screenshots/fricc-screenshot-1-main-menu.png)
+
+
+SSH connection menu:
+
+![SSH connection menu screenshot](https://raw.githubusercontent.com/maciejkorzen/fricc/master/screenshots/fricc-screenshot-2-ssh.png)
 
 # Requirements
 
